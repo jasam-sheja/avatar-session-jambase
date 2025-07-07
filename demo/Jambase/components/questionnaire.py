@@ -3,8 +3,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import (QButtonGroup, QHBoxLayout, QLabel, QPushButton,
-                               QRadioButton, QVBoxLayout)
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QHBoxLayout,
+    QLabel,
+    QRadioButton,
+    QVBoxLayout,
+)
 
 
 class Questionnaire(QVBoxLayout):
@@ -63,29 +68,8 @@ class Questionnaire(QVBoxLayout):
         label.setAlignment(Qt.AlignCenter)
         self.addWidget(label)
         self.addLayout(choices_layout)
-        self.next_btn = QPushButton("Next")
-        self.addWidget(self.next_btn, alignment=Qt.AlignRight)
 
         self.cfg = cfg
-        self.save_path = Path(cfg.get("save_path", None))
-        if self.save_path is not None:
-            if not self.save_path.exists():
-                self.save_path.mkdir(parents=True, exist_ok=True)
-            else:
-                left_save_file = self.save_path.joinpath(
-                    cfg.get("left_id", "left_questionnaire") + ".json"
-                )
-                right_save_file = self.save_path.joinpath(
-                    cfg.get("right_id", "right_questionnaire") + ".json"
-                )
-                if left_save_file.exists():
-                    raise FileExistsError(
-                        f"Save path {left_save_file} already exists. Please specify a new path."
-                    )
-                if right_save_file.exists():
-                    raise FileExistsError(
-                        f"Save path {right_save_file} already exists. Please specify a new path."
-                    )
 
         self._l_recorded = []
         self._r_recorded = []
@@ -98,16 +82,6 @@ class Questionnaire(QVBoxLayout):
 
     def record(self):
         """Record the selected choices."""
-        if self.save_path is None:
-            raise ValueError(
-                "Save path is not set. Please specify a save path in the configuration."
-            )
-        left_save_file = self.save_path.joinpath(
-            self.cfg.get("left_id", "left_questionnaire") + ".json"
-        )
-        right_save_file = self.save_path.joinpath(
-            self.cfg.get("right_id", "right_questionnaire") + ".json"
-        )
         if self.is_valid():
             left_choice = self.left_group.checkedButton()
             right_choice = self.right_group.checkedButton()
@@ -118,11 +92,17 @@ class Questionnaire(QVBoxLayout):
         else:
             raise ValueError("Both left and right choices must be selected.")
 
-        left_save_file.write_text(
-            json.dumps(self._l_recorded, indent=4, ensure_ascii=False), encoding='utf-8'
+    def save_left(self, file_path: Path):
+        """Save the selected choices."""
+
+        file_path.write_text(
+            json.dumps(self._l_recorded, indent=4, ensure_ascii=False), encoding="utf-8"
         )
-        right_save_file.write_text(
-            json.dumps(self._r_recorded, indent=4, ensure_ascii=False), encoding='utf-8'
+
+    def save_right(self, file_path: Path):
+        """Save the selected choices."""
+        file_path.write_text(
+            json.dumps(self._r_recorded, indent=4, ensure_ascii=False), encoding="utf-8"
         )
 
     def reset_question(self):

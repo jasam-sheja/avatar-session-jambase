@@ -8,8 +8,14 @@ from PySide6.QtWidgets import (
     QApplication,
     QGroupBox,
     QHBoxLayout,
+    QVBoxLayout,
+    QPushButton,
+    QLabel,
+    QLineEdit,
     QWidget,
 )
+from PySide6.QtGui import QIntValidator
+
 import cv2
 
 from av_jambase.demo import Demo, parse_args
@@ -19,6 +25,7 @@ from .utils.threads import Worker
 from .components.questionnaire import Questionnaire
 from .components.stream_viewer import StreamViewer
 from .components.session_manager import AvatarSessionManager
+from .utils import files as files_utils
 
 __dir__ = Path(__file__).resolve().parent
 
@@ -43,37 +50,7 @@ class MainWindow(QWidget):
             # Feed the camera stream
             cam = CameraThread(cfg[f"{user}_user"]["user_cam"])
             cam.change_pixmap_signal.connect(cam_layout.connect_stream)
-            # setup the writers
-            fps = cam.cap.get(cv2.CAP_PROP_FPS)
-            width = int(cam.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-            height = int(cam.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            writer = cv2.VideoWriter(
-                self.session_manager.save_path.joinpath(f"user{num}.mp4").as_posix(),
-                fourcc=cv2.VideoWriter.fourcc(*cfg.get("save_fourcc", "mp4v")),
-                fps=fps,
-                frameSize=(width, height),
-            )
-            cam_layout.cam_cap = cam.cap
-            cam_layout.set_cam_writer(writer)
-            writer = cv2.VideoWriter(
-                self.session_manager.save_path.joinpath(
-                    f"reenactment{num}-session{self.session_manager.session_num}.mp4"
-                ).as_posix(),
-                fourcc=cv2.VideoWriter.fourcc(*cfg.get("save_fourcc", "mp4v")),
-                fps=fps,
-                frameSize=cfg[f"{user}_user"].get("reenactment_img_size", (256, 256)),
-            )
-            if writer is None or not writer.isOpened():
-                raise ValueError(
-                    "Failed to create video writer for camera.",
-                    self.session_manager.save_path.joinpath(
-                        f"reenactment{num}-session{self.session_manager.session_num}.mp4"
-                    ).as_posix(),
-                    cv2.VideoWriter.fourcc(*cfg.get("save_fourcc", "mp4v")),
-                    fps,
-                    cfg[f"{user}_user"].get("reenactment_img_size", (256, 256)),
-                )
-            cam_layout.set_manip_writer(writer)
+            cam_layout.set_cam_cap(cam.cap)
             # run the camera thread
             cam.start()
             return cam_layout, cam
@@ -82,6 +59,7 @@ class MainWindow(QWidget):
         self.right_stream, right_cam = setup(2, "right")
 
         # Section 3: Questionnaire
+        last_column_layout = QVBoxLayout()
         questionnaire_cfg = cfg.get(
             "questionnaire",
             {
@@ -96,14 +74,43 @@ class MainWindow(QWidget):
             questionnaire_cfg["choices"],
             cfg=questionnaire_cfg,
         )
-        questionnaire_layout.next_btn.setEnabled(False)
         questionnaire_box = QGroupBox("Questionnaire")
         questionnaire_box.setLayout(questionnaire_layout)
-        main_layout.addWidget(questionnaire_box, stretch=0)
-        questionnaire_layout.next_btn.clicked.connect(self.start_next)
+        last_column_layout.addWidget(questionnaire_box)
+        self.questionnaire = questionnaire_layout
+
+        experiment_controls = QGroupBox("Experiment Controls")
+        experiment_controls_layout = QHBoxLayout()
+        experiment_controls_layout.addWidget(QLabel("Experiment"))
+        self.exp_textedit = QLineEdit()
+        self.exp_textedit.setPlaceholderText("experiment here.")
+        self.exp_textedit.setValidator(QIntValidator())
+        experiment_controls_layout.addWidget(self.exp_textedit)
+        self.start_btn = QPushButton("Start")
+        self.start_btn.setEnabled(False)
+        self.next_btn = QPushButton("Next")
+        self.next_btn.setEnabled(False)
+        self.next_btn.hide()  # Hide the next button initially
+        self.finish_btn = QPushButton("Finish")
+        self.finish_btn.hide()  # Hide the next button initially
+
+        experiment_controls_layout.addWidget(self.start_btn)
+        experiment_controls_layout.addWidget(self.next_btn)
+        experiment_controls_layout.addWidget(self.finish_btn)
+        experiment_controls.setLayout(experiment_controls_layout)
+        last_column_layout.addWidget(experiment_controls, stretch=0)
+
+        main_layout.addLayout(last_column_layout, stretch=0)
+
+        # Connect signals and slots
+        self.start_btn.clicked.connect(self.on_click_start)
+        self.next_btn.clicked.connect(self.on_next_click)
+        self.finish_btn.clicked.connect(self.on_finish_click)
+        self.exp_textedit.textChanged.connect(self.activate_start_btn)
+        self.left_stream.validityChanged.connect(self.activate_start_btn)
+        self.right_stream.validityChanged.connect(self.activate_start_btn)
         questionnaire_layout.left_group.buttonClicked.connect(self.activate_next_btn)
         questionnaire_layout.right_group.buttonClicked.connect(self.activate_next_btn)
-        self.questionnaire = questionnaire_layout
 
         self.setLayout(main_layout)
         self.resize(1200, 600)
@@ -118,6 +125,7 @@ class MainWindow(QWidget):
             ),
         )
         worker.signals.result.connect(self.left_stream.set_demo)
+        worker.signals.result.connect(self.activate_start_btn)
         worker.signals.error.connect(print)
         self.threadpool.start(worker)
         # setup right demo
@@ -128,91 +136,172 @@ class MainWindow(QWidget):
             ),
         )
         worker.signals.result.connect(self.right_stream.set_demo)
+        worker.signals.result.connect(self.activate_start_btn)
         worker.signals.error.connect(print)
         self.threadpool.start(worker)
+
+    def activate_start_btn(self, *args, **kwargs):
+        """Activate the next button if both left and right choices are selected."""
+        if (
+            self.exp_textedit.text().strip() != ""
+            and self.left_stream.is_valid()
+            and self.right_stream.is_valid()
+        ):
+            self.start_btn.setEnabled(True)
+        else:
+            self.start_btn.setEnabled(False)
 
     def activate_next_btn(self, *args, **kwargs):
         """Activate the next button if both left and right choices are selected."""
         if (
             self.questionnaire.is_valid()
-            and self.right_stream.demo is not None
-            and self.left_stream.demo is not None
+            and self.left_stream.is_valid()
+            and self.right_stream.is_valid()
         ):
-            self.questionnaire.next_btn.setEnabled(True)
+            self.next_btn.setEnabled(True)
         else:
-            self.questionnaire.next_btn.setEnabled(False)
+            self.next_btn.setEnabled(False)
 
-    def start_next(self):
-        if self.questionnaire.next_btn.text() == "Finish":
-            # Save the questionnaire responses and close the application
-            self.questionnaire.record()
-            self.close()
-            return
+    def on_click_start(self):
+        """Start the experiment."""
+        self.exp_textedit.setEnabled(False)
+        self.start_btn.hide()
+        self.next_btn.show()
+        self.left_stream.activate_demo()
+        self.right_stream.activate_demo()
+
+        def setup(stream: StreamViewer, user: str):
+            assert user in {"left", "right"}, "User must be either 'left' or 'right'."
+
+            # setup the writers
+            fps = stream.cam_cap.get(cv2.CAP_PROP_FPS)
+            width = int(stream.cam_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(stream.cam_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            writer_file = files_utils.get_stream_path(
+                self.exp_textedit.text(),
+                stream.user_id,
+                self.session_manager.save_path,
+            )
+            writer_file.parent.mkdir(parents=True, exist_ok=True)
+            writer = cv2.VideoWriter(
+                writer_file,
+                fourcc=cv2.VideoWriter.fourcc(*cfg.get("save_fourcc", "mp4v")),
+                fps=fps,
+                frameSize=(width, height),
+            )
+            stream.set_cam_writer(writer)
+            writer = cv2.VideoWriter(
+                files_utils.get_reenactment_path(
+                    self.exp_textedit.text(),
+                    stream.user_id,
+                    self.session_manager.session_num,
+                    self.session_manager.save_path,
+                ).as_posix(),
+                fourcc=cv2.VideoWriter.fourcc(*cfg.get("save_fourcc", "mp4v")),
+                fps=fps,
+                frameSize=cfg[f"{user}_user"].get("reenactment_img_size", (256, 256)),
+            )
+            if writer is None or not writer.isOpened():
+                raise ValueError(
+                    "Failed to create video writer for camera.",
+                )
+            stream.set_manip_writer(writer)
+
+        setup(self.left_stream, "left")
+        setup(self.right_stream, "right")
+        files_utils.link_other_subject(
+            self.exp_textedit.text(),
+            self.left_stream.user_id,
+            self.right_stream.user_id,
+            self.session_manager.save_path,
+        )
+
+    def on_next_click(self):
         self.session_manager.next_session()
 
         # Record the current questionnaire responses and reset the question
         self.questionnaire.record()
+        self.questionnaire.save_left(
+            files_utils.get_questionnaire_path(
+                self.exp_textedit.text(),
+                self.left_stream.user_id,
+                self.session_manager.save_path,
+            ),
+        )
+        self.questionnaire.save_right(
+            files_utils.get_questionnaire_path(
+                self.exp_textedit.text(),
+                self.right_stream.user_id,
+                self.session_manager.save_path,
+            ),
+        )
         self.questionnaire.reset_question()
-        self.questionnaire.next_btn.setEnabled(False)
+        self.next_btn.setEnabled(False)
 
-        # close the video writers
-        save_path = self.cfg["save_path"]
-
-        def update(num: int, user: str, stream: StreamViewer):
+        def update(stream: StreamViewer, user: str, new_source: str):
             assert user in {"left", "right"}, "User must be either 'left' or 'right'."
-            assert 1 <= num <= 2, "User number must be either 1 or 2."
-            ## Reenactment video writer
+
+            # setup the writers
             fps = stream.cam_cap.get(cv2.CAP_PROP_FPS)
             writer = cv2.VideoWriter(
-                self.session_manager.save_path.joinpath(
-                    f"reenactment{num}-session{self.session_manager.session_num}.mp4"
+                files_utils.get_reenactment_path(
+                    self.exp_textedit.text(),
+                    stream.user_id,
+                    self.session_manager.session_num,
+                    self.session_manager.save_path,
                 ).as_posix(),
-                fourcc=cv2.VideoWriter.fourcc(*self.cfg.get("save_fourcc", "mp4v")),
+                fourcc=cv2.VideoWriter.fourcc(*cfg.get("save_fourcc", "mp4v")),
                 fps=fps,
-                frameSize=self.cfg[f"{user}_user"].get(
-                    "reenactment_img_size", (256, 256)
-                ),
+                frameSize=cfg[f"{user}_user"].get("reenactment_img_size", (256, 256)),
             )
             if writer is None or not writer.isOpened():
                 raise ValueError(
-                    "Failed to create video writer for left camera.",
-                    self.session_manager.save_path.joinpath(
-                        f"reenactment{num}-session{self.session_manager.session_num}.mp4"
-                    ).as_posix(),
-                    cv2.VideoWriter.fourcc(*self.cfg.get("save_fourcc", "mp4v")),
-                    fps,
-                    self.cfg[f"{user}_user"].get("reenactment_img_size", (256, 256)),
+                    "Failed to create video writer for camera.",
                 )
             switch = stream.manip_writer
+            worker = Worker(
+                stream.demo.prep_source,
+                new_source,
+            )
+            self.threadpool.start(worker)
             stream.set_manip_writer(writer)
             switch.release()
 
-        update(1, "left", self.left_stream)
-        update(2, "right", self.right_stream)
-
-        # Start the next reenactment
-        self.left_stream.demo.prep_source(self.session_manager.get_left_avatar())
-        self.right_stream.demo.prep_source(self.session_manager.get_right_avatar())
+        update(self.left_stream, "left", self.session_manager.get_left_avatar())
+        update(self.right_stream, "right", self.session_manager.get_right_avatar())
 
         if self.session_manager.available_sessions() <= 0:
             # the experiment is over
-            self.questionnaire.next_btn.setText("Finish")
-            return
+            self.next_btn.hide()
+            self.finish_btn.show()
 
-    def closeEvent(self, event):
+    def on_finish_click(self):
+        """Finish the experiment."""
+        self.questionnaire.record()
+        self.questionnaire.save_left(
+            files_utils.get_questionnaire_path(
+                self.exp_textedit.text(),
+                self.left_stream.user_id,
+                self.session_manager.save_path,
+            ),
+        )
+        self.questionnaire.save_right(
+            files_utils.get_questionnaire_path(
+                self.exp_textedit.text(),
+                self.right_stream.user_id,
+                self.session_manager.save_path,
+            ),
+        )
         self.hide()
         for thread in self.threads:
             thread.stop()
+        self.left_stream.stop()
+        self.right_stream.stop()
+        self.close()
+
+    def closeEvent(self, event):
         event.accept()
-        # Release the video writers
-        if self.left_stream.cam_writer is not None:
-            self.left_stream.cam_writer.release()
-        if self.left_stream.manip_writer is not None:
-            self.left_stream.manip_writer.release()
-        if self.right_stream.cam_writer is not None:
-            self.right_stream.cam_writer.release()
-        if self.right_stream.manip_writer is not None:
-            self.right_stream.manip_writer.release()
+        QApplication.quit()
 
 
 if __name__ == "__main__":
