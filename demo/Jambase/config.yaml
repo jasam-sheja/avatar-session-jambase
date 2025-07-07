@@ -1,0 +1,50 @@
+ui_file_path: ui/user_window.ui
+
+window_title: Jambase-Avatar
+
+left_user:
+  user_cam: /dev/video0
+  save_path: /mnt/HD-8.0TB/Moonshot/avatar-session-jambase/demo/Jambase/output
+  reenactment_img_size: [ 256, 256 ]
+
+right_user:
+  user_cam: /dev/video2
+  save_path: /mnt/HD-8.0TB/Moonshot/avatar-session-jambase/demo/Jambase/output
+  reenactment_img_size: [ 256, 256 ]
+
+avatar_pool:
+  session_1:
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/macron.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/mona_lisa.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/monroe.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/source.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/taylor.png
+  session_2:
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/macron.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/mona_lisa.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/monroe.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/source.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/taylor.png
+  session_3:
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/macron.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/mona_lisa.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/monroe.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/source.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/taylor.png
+  session_4:
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/macron.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/mona_lisa.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/monroe.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/source.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/taylor.png
+
+questionnaire:
+  question: "CAが相手の表情をうまく反映しますか?"
+  choices:
+  - "同じ表情"
+  - "似た表情"
+  - "少し違う"
+  - "違う"
+
+save_path: /mnt/HD-8.0TB/Moonshot/avatar-session-jambase/demo/Jambase/output
+save_fourcc: mp4v
