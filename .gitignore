@@ -201,9 +201,12 @@ cython_debug/
 .cursorindexingignore
 
 # Models
-.pt
-.pth
-.ckpt
-.pth.tar
-.ckpt.tar
-.safetensors
+*.pt
+*.pth
+*.ckpt
+*.pth.tar
+*.ckpt.tar
+*.safetensors
+
+# raddeid project
+av_jambase/reenactors/raddeid_api/assets/BFM/
