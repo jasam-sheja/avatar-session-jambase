@@ -1,9 +1,6 @@
-import datetime
 import random
-import string
 from pathlib import Path
 from typing import Any, Dict
-
 
 
 class AvatarSessionManager:
@@ -14,14 +11,9 @@ class AvatarSessionManager:
 
     def __init__(self, cfg: Dict[str, Any]):
         self.cfg = cfg
-        self.session_id = (
-            "".join(random.choices(string.ascii_uppercase + string.digits, k=5))
-            + "-"
-            + datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        )
         if "save_path" not in cfg:
             raise ValueError("Save path is not specified in the configuration.")
-        self.save_path = Path(cfg["save_path"]) / self.session_id
+        self.save_path = Path(cfg["save_path"])
         self.save_path.mkdir(parents=True, exist_ok=True)
 
         avatar_pools = [
@@ -69,4 +61,3 @@ class AvatarSessionManager:
         Returns True if there are more sessions, False otherwise.
         """
         return self.session_num < len(self.avatar_pools)
-

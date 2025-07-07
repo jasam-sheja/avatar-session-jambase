@@ -210,3 +210,6 @@ cython_debug/
 
 # raddeid project
 av_jambase/reenactors/raddeid_api/assets/BFM/
+
+# Output directories
+demo/Jambase/output
