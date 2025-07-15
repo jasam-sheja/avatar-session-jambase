@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 import yaml
-from PySide6.QtCore import QThreadPool
+from PySide6.QtCore import QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QApplication,
     QGroupBox,
@@ -22,7 +22,6 @@ from av_jambase.demo import Demo, parse_args
 
 from .camera import CameraThread
 from .utils.threads import Worker
-from .components.questionnaire import Questionnaire
 from .components.stream_viewer import StreamViewer
 from .components.session_manager import AvatarSessionManager
 from .utils import files as files_utils
@@ -58,27 +57,7 @@ class MainWindow(QWidget):
         self.left_stream, left_cam = setup(1, "left")
         self.right_stream, right_cam = setup(2, "right")
 
-        # Section 3: Questionnaire
         last_column_layout = QVBoxLayout()
-        questionnaire_cfg = cfg.get(
-            "questionnaire",
-            {
-                "question": "How good is the avatar?",
-                "choices": ["Great", "Good", "Okay", "Bad"],
-            },
-        )
-        # session folder
-        questionnaire_cfg["save_path"] = self.session_manager.save_path.as_posix()
-        questionnaire_layout = Questionnaire(
-            questionnaire_cfg["question"],
-            questionnaire_cfg["choices"],
-            cfg=questionnaire_cfg,
-        )
-        questionnaire_box = QGroupBox("Questionnaire")
-        questionnaire_box.setLayout(questionnaire_layout)
-        last_column_layout.addWidget(questionnaire_box)
-        self.questionnaire = questionnaire_layout
-
         experiment_controls = QGroupBox("Experiment Controls")
         experiment_controls_layout = QHBoxLayout()
         experiment_controls_layout.addWidget(QLabel("Experiment"))
@@ -92,6 +71,7 @@ class MainWindow(QWidget):
         self.next_btn.setEnabled(False)
         self.next_btn.hide()  # Hide the next button initially
         self.finish_btn = QPushButton("Finish")
+        self.finish_btn.setEnabled(False)
         self.finish_btn.hide()  # Hide the next button initially
 
         experiment_controls_layout.addWidget(self.start_btn)
@@ -109,8 +89,6 @@ class MainWindow(QWidget):
         self.exp_textedit.textChanged.connect(self.activate_start_btn)
         self.left_stream.validityChanged.connect(self.activate_start_btn)
         self.right_stream.validityChanged.connect(self.activate_start_btn)
-        questionnaire_layout.left_group.buttonClicked.connect(self.activate_next_btn)
-        questionnaire_layout.right_group.buttonClicked.connect(self.activate_next_btn)
 
         self.setLayout(main_layout)
         self.resize(1200, 600)
@@ -151,22 +129,12 @@ class MainWindow(QWidget):
         else:
             self.start_btn.setEnabled(False)
 
-    def activate_next_btn(self, *args, **kwargs):
-        """Activate the next button if both left and right choices are selected."""
-        if (
-            self.questionnaire.is_valid()
-            and self.left_stream.is_valid()
-            and self.right_stream.is_valid()
-        ):
-            self.next_btn.setEnabled(True)
-        else:
-            self.next_btn.setEnabled(False)
-
     def on_click_start(self):
         """Start the experiment."""
         self.exp_textedit.setEnabled(False)
         self.start_btn.hide()
         self.next_btn.show()
+        QTimer.singleShot(10_000, lambda: self.next_btn.setEnabled(True))
         self.left_stream.activate_demo()
         self.right_stream.activate_demo()
 
@@ -219,24 +187,8 @@ class MainWindow(QWidget):
     def on_next_click(self):
         self.session_manager.next_session()
 
-        # Record the current questionnaire responses and reset the question
-        self.questionnaire.record()
-        self.questionnaire.save_left(
-            files_utils.get_questionnaire_path(
-                self.exp_textedit.text(),
-                self.left_stream.user_id,
-                self.session_manager.save_path,
-            ),
-        )
-        self.questionnaire.save_right(
-            files_utils.get_questionnaire_path(
-                self.exp_textedit.text(),
-                self.right_stream.user_id,
-                self.session_manager.save_path,
-            ),
-        )
-        self.questionnaire.reset_question()
         self.next_btn.setEnabled(False)
+        QTimer.singleShot(10_000, lambda: self.next_btn.setEnabled(True))
 
         def update(stream: StreamViewer, user: str, new_source: str):
             assert user in {"left", "right"}, "User must be either 'left' or 'right'."
@@ -274,24 +226,10 @@ class MainWindow(QWidget):
             # the experiment is over
             self.next_btn.hide()
             self.finish_btn.show()
+            QTimer.singleShot(10_000, lambda: self.finish_btn.setEnabled(True))
 
     def on_finish_click(self):
         """Finish the experiment."""
-        self.questionnaire.record()
-        self.questionnaire.save_left(
-            files_utils.get_questionnaire_path(
-                self.exp_textedit.text(),
-                self.left_stream.user_id,
-                self.session_manager.save_path,
-            ),
-        )
-        self.questionnaire.save_right(
-            files_utils.get_questionnaire_path(
-                self.exp_textedit.text(),
-                self.right_stream.user_id,
-                self.session_manager.save_path,
-            ),
-        )
         self.hide()
         for thread in self.threads:
             thread.stop()
