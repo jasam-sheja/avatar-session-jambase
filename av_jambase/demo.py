@@ -25,6 +25,11 @@ from .utils import (FaceNotFoundError, SingleFaceDetector, draw_landmarks,
 
 logger = logging.getLogger(__name__)
 
+if torch.cuda.is_available():
+    # Ensure that CUDA is initialized properly
+    # This is a workaround for a known issue with PyTorch and CUDA initialization
+    # https://github.com/pytorch/pytorch/issues/90613#issuecomment-1497238767
+    torch.inverse(torch.eye(3, device="cuda:0"))
 
 def parse_args(args=None) -> ArgumentParser:
     """
