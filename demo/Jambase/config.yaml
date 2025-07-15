@@ -14,11 +14,11 @@ right_user:
 
 avatar_pool:
   session_1:
-  - /mnt/HD-8.0TB/Moonshot/demo/assets/macron.png
-  - /mnt/HD-8.0TB/Moonshot/demo/assets/mona_lisa.png
-  - /mnt/HD-8.0TB/Moonshot/demo/assets/monroe.png
-  - /mnt/HD-8.0TB/Moonshot/demo/assets/source.png
-  - /mnt/HD-8.0TB/Moonshot/demo/assets/taylor.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/Ayako.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/Keiko.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/Meguro.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/Shohei.png
+  - /mnt/HD-8.0TB/Moonshot/demo/assets/Tetsuro.png
   session_2:
   - /mnt/HD-8.0TB/Moonshot/demo/assets/macron.png
   - /mnt/HD-8.0TB/Moonshot/demo/assets/mona_lisa.png
@@ -48,3 +48,4 @@ questionnaire:
 
 save_path: /mnt/HD-8.0TB/Moonshot/avatar-session-jambase/demo/Jambase/output
 save_fourcc: mp4v
+loading_gif_path: /mnt/HD-8.0TB/Moonshot/avatar-session-jambase/demo/Jambase/assets/Infinity@1x-2.0s-200px-200px.gif
