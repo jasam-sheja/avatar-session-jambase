@@ -24,11 +24,11 @@ class StreamViewer(QVBoxLayout):
         super().__init__()
         self.cam_view = QLabel(cam_label)
         self.cam_view.setFrameShape(QFrame.Box)
-        self.cam_view.setAlignment(Qt.AlignCenter)
+        self.cam_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.cam_view.setStyleSheet("background-color: black;")
         self.manip_view = QLabel(manip_label)
         self.manip_view.setFrameShape(QFrame.Box)
-        self.manip_view.setAlignment(Qt.AlignCenter)
+        self.manip_view.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.manip_view.setStyleSheet("background-color: black;")
         self.addWidget(self.cam_view)
         self.addWidget(self.manip_view)
@@ -51,6 +51,7 @@ class StreamViewer(QVBoxLayout):
 
         self.demo = None
         self._show_demo = False
+        self._demo_running = False
         self.cam_cap: cv2.VideoCapture = None
         self.cam_writer: cv2.VideoWriter = None
         self.manip_writer: cv2.VideoWriter = None
@@ -79,7 +80,11 @@ class StreamViewer(QVBoxLayout):
 
     def is_valid(self) -> bool:
         """Check if the user ID is valid."""
-        return not self.lineedit.isEnabled() and self.demo is not None
+        return (
+            not self.lineedit.isEnabled()
+            and self.demo is not None
+            and self._demo_running
+        )
 
     def set_cam_cap(self, cam_cap: cv2.VideoCapture):
         """Set the camera capture object."""
@@ -133,6 +138,11 @@ class StreamViewer(QVBoxLayout):
             )
         with torch.cuda.stream(torch.cuda.Stream()):
             rgb_manip = self.demo.apply(rgb_image)
+
+        isvalid = self.is_valid()
+        self._demo_running = True
+        if isvalid != self.is_valid():
+            self.validityChanged.emit(self.is_valid())
         if not self._show_demo:
             return
         # Convert the manipulated RGB image to QImage
