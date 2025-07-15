@@ -24,6 +24,7 @@ from .camera import CameraThread
 from .utils.threads import Worker
 from .components.stream_viewer import StreamViewer
 from .components.session_manager import AvatarSessionManager
+from .components.session_timer import StopwatchWidget
 from .utils import files as files_utils
 
 __dir__ = Path(__file__).resolve().parent
@@ -58,6 +59,14 @@ class MainWindow(QWidget):
         self.right_stream, right_cam = setup(2, "right")
 
         last_column_layout = QVBoxLayout()
+
+        self.session_timer = StopwatchWidget()
+        self.avatar_timer = StopwatchWidget()
+        last_column_layout.addStretch()
+        last_column_layout.addWidget(self.session_timer)
+        last_column_layout.addWidget(self.avatar_timer)
+        last_column_layout.addStretch()
+
         experiment_controls = QGroupBox("Experiment Controls")
         experiment_controls_layout = QHBoxLayout()
         experiment_controls_layout.addWidget(QLabel("Experiment"))
@@ -131,6 +140,8 @@ class MainWindow(QWidget):
 
     def on_click_start(self):
         """Start the experiment."""
+        self.session_timer.start()
+        self.avatar_timer.start()
         self.exp_textedit.setEnabled(False)
         self.start_btn.hide()
         self.next_btn.show()
@@ -186,6 +197,7 @@ class MainWindow(QWidget):
 
     def on_next_click(self):
         self.session_manager.next_session()
+        self.avatar_timer.reset().start()
 
         self.next_btn.setEnabled(False)
         QTimer.singleShot(10_000, lambda: self.next_btn.setEnabled(True))
