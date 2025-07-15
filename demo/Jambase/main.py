@@ -25,6 +25,7 @@ from .utils.threads import Worker
 from .components.stream_viewer import StreamViewer
 from .components.session_manager import AvatarSessionManager
 from .components.session_timer import StopwatchWidget
+from .components.loading_widget import LoadingWidget
 from .utils import files as files_utils
 
 __dir__ = Path(__file__).resolve().parent
@@ -66,6 +67,11 @@ class MainWindow(QWidget):
         last_column_layout.addWidget(self.session_timer)
         last_column_layout.addWidget(self.avatar_timer)
         last_column_layout.addStretch()
+
+
+
+        self.loading_widget = LoadingWidget(gif_path=cfg.get("loading_gif_path", None))
+        last_column_layout.addWidget(self.loading_widget)
 
         experiment_controls = QGroupBox("Experiment Controls")
         experiment_controls_layout = QHBoxLayout()
@@ -135,6 +141,8 @@ class MainWindow(QWidget):
             and self.right_stream.is_valid()
         ):
             self.start_btn.setEnabled(True)
+            self.loading_widget.stop()
+            self.loading_widget.hide()
         else:
             self.start_btn.setEnabled(False)
 
