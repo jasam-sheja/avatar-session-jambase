@@ -18,7 +18,10 @@ from ..utils.threads import Worker
 
 
 class StreamViewer(QVBoxLayout):
+    # Signal to indicate validity change of the stream viewer
     validityChanged = Signal(bool)
+    # Signal to update the manipulated view
+    updateManipView = Signal(QPixmap)
 
     def __init__(self, cam_label: str, manip_label: str):
         super().__init__()
@@ -48,6 +51,7 @@ class StreamViewer(QVBoxLayout):
         # Connect signals and slots
         self.lineedit.textChanged.connect(self.on_id_changed)
         self.accept_btn.clicked.connect(self.on_set_clicked)
+        self.updateManipView.connect(self.manip_view.setPixmap)
 
         self.demo = None
         self._show_demo = False
@@ -152,7 +156,7 @@ class StreamViewer(QVBoxLayout):
         img = QImage(rgb_manip.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
         # self.manip_view.setPixmap(QPixmap.fromImage(img))
         pixmap = QPixmap.fromImage(img)
-        self.manip_view.setPixmap(
+        self.updateManipView.emit(
             pixmap.scaled(
                 self.manip_view.size() * (3 / 4),
                 Qt.AspectRatioMode.KeepAspectRatio,
