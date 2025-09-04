@@ -1,7 +1,10 @@
 import logging
-from typing import NamedTuple, Tuple
+from pathlib import Path
+from typing import List, NamedTuple, Tuple
 
 import cv2
+import mediapipe as mp
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torchvision as tv
@@ -9,44 +12,19 @@ from face_alignment.detection.sfd.bbox import decode
 from face_alignment.detection.sfd.net_s3fd import s3fd
 from face_alignment.utils import load_file_from_url
 from scipy.spatial import ConvexHull
-from torch import Tensor, nn
+from torch import Tensor
 from torch.utils.model_zoo import load_url
 
+from .base import FaceNotFoundError
+
+__dir__ = Path(__file__).resolve().parent
 logger = logging.getLogger(__name__)
-# logger.setLevel(logging.DEBUG)
 
 MODELS_URLS = {
     "2DFAN-4": "https://www.adrianbulat.com/downloads/python-fan/2DFAN4_1.6-c827573f02.zip",
     "3DFAN-4": "https://www.adrianbulat.com/downloads/python-fan/3DFAN4_1.6-ec5cf40a1d.zip",
     "depth": "https://www.adrianbulat.com/downloads/python-fan/depth_1.6-2aa3f18772.zip",
 }
-
-
-def linspace(start: Tensor, stop: Tensor, num: int, outdim: int = 0):
-    """
-    Creates a tensor of shape [num, *start.shape] whose values are evenly spaced from start to end, inclusive.
-    Replicates but the multi-dimensional bahaviour of numpy.linspace in PyTorch.
-    source(before modifications) https://github.com/pytorch/pytorch/issues/61292
-    """
-    # create a tensor of 'num' steps from 0 to 1
-    assert start.shape == stop.shape
-    assert start.device == stop.device
-    assert start.dtype == stop.dtype
-    if outdim < 0:
-        # if outdim is negative, then it is counted from the end of the output tensor
-        outdim = start.ndim + 1 + outdim
-    # create the 'steps' tensor
-    steps: Tensor = torch.linspace(0, 1, num, dtype=start.dtype, device=start.device)
-    # reshape the 'steps' tensor to allow for broadcastings.
-    # for example, if start.ndim = 3 and outdim = 1, then steps.shape = [1, num, 1, 1]
-    for i in range(start.ndim):
-        steps = steps.unsqueeze(-int(i >= outdim))
-    # reshape the start and stop tensors to allow for broadcastings
-    start = start.unsqueeze(outdim)
-    stop = stop.unsqueeze(outdim)
-    # the output starts at 'start' and increments until 'stop' in each dimension
-    out = start + steps * (stop - start)
-    return out
 
 
 def decode(loc, priors, alpha, beta):
@@ -148,23 +126,6 @@ class FaceDetector(s3fd):
         return return_face(boxes, scores, torch.arange(x.size(0), device=x.device))
 
 
-def iou(bbox1: Tuple[Tensor, Tensor], bbox2: Tuple[Tensor, Tensor]) -> Tensor:
-    cxy, shw = bbox1
-    cxy2, shw2 = bbox2
-    # compute the intersection
-    inter_cxy = torch.max(cxy - shw / 2, cxy2 - shw2 / 2)
-    inter_cxy2 = torch.min(cxy + shw / 2, cxy2 + shw2 / 2)
-    inter_wh = torch.clamp(inter_cxy2 - inter_cxy, min=0)
-    inter_area = inter_wh[:, 0] * inter_wh[:, 1]
-    # compute the union
-    area1 = shw[:, 0] * shw[:, 1]
-    area2 = shw2[:, 0] * shw2[:, 1]
-    union_area = area1 + area2 - inter_area
-    # compute the IoU
-    iou = inter_area / union_area
-    return iou
-
-
 class SingleFaceDetector(FaceDetector):
     def __init__(self, filter_threshold=0.5, momentum=0.9):
         super().__init__(filter_threshold)
@@ -194,6 +155,9 @@ class SingleFaceDetector(FaceDetector):
         _center_xy = (ret.boxes[:, :2] + ret.boxes[:, 2:]) / 2
         _size_wh = ret.boxes[:, 2:] - ret.boxes[:, :2]
         if _size_wh.prod().item() == 0:
+            logger.getChild("SingleFaceDetector").error(
+                "No faces detected in the image."
+            )
             raise FaceNotFoundError("No faces detected in the image.")
         if no_smoothing:
             return ret
@@ -201,8 +165,17 @@ class SingleFaceDetector(FaceDetector):
             # logger.debug(f"First frame detected: center_xy={_center_xy}, size_wh={_size_wh}")
             self._center_xy = _center_xy
             self._size_wh = _size_wh
+            print("First frame detected", _size_wh.prod().item())
             return ret
         # logger.debug(f"Updated center_xy={_center_xy.tolist()}, size_wh={_size_wh.tolist()}, iou={iou((self._center_xy, self._size_wh), (_center_xy, _size_wh)).item()}")
+        print(
+            f"{(self.momentum * self._center_xy + (1 - self.momentum) * _center_xy).round().view(-1).tolist()} = {self.momentum:<.2f} * {self._center_xy.round().view(-1).tolist()} + {1-self.momentum:<.2f} * {_center_xy.round().view(-1).tolist()}",
+            end="\t\t\t",
+        )
+        print(
+            f"{(self.momentum * self._size_wh + (1 - self.momentum) * _size_wh).round().view(-1).tolist()} = {self.momentum:<.2f} * {self._size_wh.round().view(-1).tolist()} + {1-self.momentum:<.2f} * {_size_wh.round().view(-1).tolist()}"
+        )
+
         self._center_xy = (
             self.momentum * self._center_xy + (1 - self.momentum) * _center_xy
         )
@@ -223,125 +196,6 @@ class LandmarksDetector(s3fd):
         )
 
 
-crop_and_resize_returntype = NamedTuple(
-    "crop_and_resize_returntype", [("crop", Tensor), ("bbox", Tensor)]
-)
-
-
-def crop_and_resize(
-    video_tensor: Tensor,
-    bbox: Tensor,
-    target_height: int,
-    target_width: int,
-    margin: int | float = 0,
-    channel_last: bool = False,
-    round_bbox: bool = False,
-    _align_corners: bool = True,
-) -> crop_and_resize_returntype:
-    """
-    Vectorized batch-process cropping and resizing of the blob in the video tensor using grid_sample.
-
-    Parameters:
-    - video_tensor (torch.Tensor): The video tensor of shape T x H x W x C.
-    - bbox (torch.Tensor): The bounding box tensor of shape T x 4, where 4 represents the bounding box x1, y1, x2, y2.
-    - target_height (int): Target height 'h' for the output tensor.
-    - target_width (int): Target width 'w' for the output tensor.
-    Keyword Arguments:
-    - margin (Union[int, float]): Margin to add to the bounding box. If int, it is added to all sides. If float, it is
-        multiplied by the bounding box half size. Default is 0.
-    - round_bbox (bool): If True, the bounding box is rounded to the nearest integer. Default is False.
-    - channel_last (bool): If True, the input tensor has channel last format. Default is False.
-
-    Returns:
-    - torch.Tensor: Cropped and resized video tensor of shape T x h x w x C.
-    """
-    if channel_last:
-        video_tensor = video_tensor.permute(0, 3, 1, 2)
-    T, C, H, W = video_tensor.shape
-    x1, y1, x2, y2 = bbox.unbind(dim=1)
-    x2, x1 = torch.maximum(x1, x2), torch.minimum(x1, x2)
-    y2, y1 = torch.maximum(y1, y2), torch.minimum(y1, y2)
-    cx, cy = ((x1 + x2) / 2, (y1 + y2) / 2)
-    sw, sh = (x2 - x1, y2 - y1)
-    aspect_compare = sw / sh > target_width / target_height
-    _sh = torch.where(aspect_compare, sw * target_height / target_width, sh)
-    _sw = torch.where(aspect_compare, sw, sh * target_width / target_height)
-    sh, sw = _sh, _sw
-    if isinstance(margin, int):
-        # add margin to the bounding box by margin pixels
-        x1, x2 = (cx - sw / 2 - margin, cx + sw / 2 + margin)
-        y1, y2 = (cy - sh / 2 - margin, cy + sh / 2 + margin)
-    elif isinstance(margin, float):
-        # add margin to the bounding box by margin ratio
-        x1, x2 = (cx - sw / 2 - margin * sw, cx + sw / 2 + margin * sw)
-        y1, y2 = (cy - sh / 2 - margin * sh, cy + sh / 2 + margin * sh)
-    else:
-        # no margin
-        x1, x2 = (cx - sw / 2, cx + sw / 2)
-        y1, y2 = (cy - sh / 2, cy + sh / 2)
-
-    if round_bbox:
-        x1, y1, x2, y2 = (x1.round(), y1.round(), x2.round(), y2.round())
-
-    # move to normalized coordinates [-1 1]
-    nx1 = x1 / W * 2 - 1
-    nx2 = x2 / W * 2 - 1
-    ny1 = y1 / H * 2 - 1
-    ny2 = y2 / H * 2 - 1
-
-    # Generate the grid for grid_sample
-    grid_h = linspace(ny1, ny2, target_height, outdim=1)  # [T, target_height]
-    grid_w = linspace(nx1, nx2, target_width, outdim=1)  # [T, target_width]
-    grid_h = grid_h.unsqueeze(-1).expand(
-        -1, -1, target_width
-    )  # [T, target_height, target_width]
-    grid_w = grid_w.unsqueeze(-2).expand(
-        -1, target_height, -1
-    )  # [T, target_height, target_width]
-    grid = torch.stack((grid_w, grid_h), dim=-1)  # [T, target_height, target_width, 2]
-    if grid.size(0) == 1 and video_tensor.size(0) > 1:
-        # expand the grid to match the batch size because grid_sample does not broadcast
-        grid = grid.expand(video_tensor.size(0), -1, -1, -1)
-
-    # grid_sample
-    cropvideo_tensor = torch.nn.functional.grid_sample(
-        video_tensor, grid, align_corners=_align_corners
-    )
-    if channel_last:
-        cropvideo_tensor = cropvideo_tensor.permute(0, 2, 3, 1)
-    return crop_and_resize_returntype(
-        cropvideo_tensor, torch.stack((x1, y1, x2, y2), dim=1)
-    )
-
-
-if __name__ == "__main__":
-    import face_alignment
-
-    with torch.inference_mode():
-        fa = face_alignment.FaceAlignment(
-            face_alignment.LandmarksType.TWO_D, device="cuda"
-        )
-        fd = FaceDetector().cuda()
-        im = tv.io.decode_image(
-            "/home/alsherfawi/Downloads/biden.jpg", tv.io.image.ImageReadMode.RGB
-        )
-        im = im.cuda().float().unsqueeze(0).div_(255)
-        # import matplotlib.pyplot as plt
-        # plt.imshow(im.cpu().detach().squeeze(0).permute(1, 2, 0))
-        # plt.show()
-        # detection = fd(im)
-        # print(detection.boxes)
-        # out = crop_and_resize(im, detection.boxes, 224, 224)
-        # face alignment
-        det = fa.face_detector.detect_from_batch(im.mul(255))[0]
-        print(det)
-        exit()
-        import matplotlib.pyplot as plt
-
-        plt.imshow(out.cpu().detach().squeeze(0).permute(1, 2, 0))
-        plt.show()
-
-
 def compute_aspect_preserved_bbox(bbox, increase_area):
     left, top, right, bot = bbox
     width = right - left
@@ -357,50 +211,6 @@ def compute_aspect_preserved_bbox(bbox, increase_area):
     right = int(right + width_increase * width)
     bot = int(bot + height_increase * height)
     return (left, top, right, bot)
-
-
-def preprocess(
-    vid: Tensor,
-    fd: FaceDetector,
-    target_shape: Tuple[int, int],
-    tqdm=None,
-    _margin=0.3,
-    _batch_size=32,
-):
-    """
-    Preprocess the video frames by detecting faces and cropping them.
-
-    Args:
-        vid (Tensor): Video frames as a tensor.
-        fd (FaceDetector): Face detector instance.
-        target_shape (Tuple[int, int]): Target shape for resizing.
-        tqdm (optional): TQDM progress bar instance.
-        _margin (float): Margin around the detected face bounding box.
-        _batch_size (int): Batch size for face detection.
-
-    Returns:
-        Tuple[Tensor, Tensor]: Cropped video frames and bounding boxes.
-    """
-    vidstream = vid.split(_batch_size) if len(vid) > _batch_size else [vid]
-    if tqdm is not None:
-        vidstream = tqdm(vidstream, desc="Detecting faces")
-    bboxes = torch.cat([fd(batch.contiguous()).boxes for batch in vidstream])
-    keep = (
-        bboxes != torch.tensor([0, 0, 0, 0], dtype=bboxes.dtype, device=bboxes.device)
-    ).all(dim=1)
-    x1, y1, x2, y2 = bboxes[keep].unbind(1)
-    if x1.numel() == 0:
-        raise FaceNotFoundError("No faces detected in the video.")
-    x1 = x1.min().clamp(0, vid.size(-1) - 1)
-    y1 = y1.min().clamp(0, vid.size(-2) - 1)
-    x2 = x2.max().clamp(x1.item() + 1, vid.size(-1))
-    y2 = y2.max().clamp(y1.item() + 1, vid.size(-2))
-    bboxes = torch.stack([x1, y1, x2, y2]).unsqueeze(0)
-    crops, bboxes = crop_and_resize(
-        vid, bboxes, target_shape[0], target_shape[1], margin=_margin, round_bbox=True
-    )
-    crops = crops
-    return crops, bboxes
 
 
 def draw_landmarks(
@@ -422,6 +232,8 @@ def draw_landmarks(
         scatter_params (dict): Parameters for scatter points.
         hull_params (dict): Parameters for convex hull.
     """
+    if isinstance(lms, Tensor):
+        lms = lms.cpu().numpy()
     lms = lms.astype(int)
     scatter_params = scatter_params or {}
     hull_params = hull_params or {}
@@ -437,6 +249,7 @@ def draw_landmarks(
                 **scatter_params,
             )
     if hull:
+        lms = np.ascontiguousarray(lms)
         hull = ConvexHull(lms)
         cv2.polylines(
             image,
@@ -448,9 +261,129 @@ def draw_landmarks(
         )
 
 
-class FaceNotFoundError(Exception):
-    """
-    Custom exception raised when no face is detected in the video.
-    """
+BaseOptions = mp.tasks.BaseOptions
+FaceLandmarker = mp.tasks.vision.FaceLandmarker
+FaceLandmarkerOptions = mp.tasks.vision.FaceLandmarkerOptions
+VisionRunningMode = mp.tasks.vision.RunningMode
 
-    pass
+
+mediapipe_return_type = NamedTuple(
+    "mediapipe_return_type",
+    [
+        ("landmarks", List[Tuple[float, float, float]]),
+        ("blendshape", List[float]),
+        ("transformation_matrixes", List[List[float]]),
+    ],
+)
+
+
+def _options(
+    model_asset_path: str | None = None,
+    delegate: str | None = None,
+    running_mode: str | None = None,
+    min_face_detection_confidence: float = 0.1,
+    min_face_presence_confidence: float = 0.1,
+    min_tracking_confidence: float = 0.1,
+    output_facial_transformation_matrixes: bool = False,
+    output_face_blendshapes: bool = False,
+    num_faces: int = 1,
+) -> FaceLandmarkerOptions:  # pyright: ignore[reportInvalidTypeForm]
+    if model_asset_path is None:
+        model_asset_path = __dir__.joinpath("face_landmarker.task").as_posix()
+    if delegate is None or delegate == "gpu":
+        delegate = BaseOptions.Delegate.GPU
+    else:
+        delegate = BaseOptions.Delegate.CPU
+    if running_mode is None or running_mode == "video":
+        running_mode = VisionRunningMode.VIDEO
+    else:
+        running_mode = VisionRunningMode.IMAGE
+    return FaceLandmarkerOptions(
+        base_options=BaseOptions(
+            model_asset_path=model_asset_path,
+            delegate=delegate,
+        ),
+        running_mode=running_mode,
+        min_face_detection_confidence=min_face_detection_confidence,
+        min_face_presence_confidence=min_face_presence_confidence,
+        min_tracking_confidence=min_tracking_confidence,
+        output_facial_transformation_matrixes=output_facial_transformation_matrixes,
+        output_face_blendshapes=output_face_blendshapes,
+        num_faces=num_faces,
+    )
+
+
+class MediapipeTool:
+    def __init__(
+        self,
+        running_mode: str,
+        fps: int,
+        model_asset_path: str | None = None,
+        space: str = "image",
+    ):
+        try:
+            self.landmarker = FaceLandmarker.create_from_options(
+                _options(
+                    model_asset_path=model_asset_path,
+                    running_mode=running_mode,
+                    delegate="gpu",
+                    output_facial_transformation_matrixes=True
+                )
+            )
+        except RuntimeError:
+            logger.warning("Failed to load GPU delegate. Falling back to CPU delegate.")
+            self.landmarker = FaceLandmarker.create_from_options(
+                _options(
+                    model_asset_path=model_asset_path,
+                    running_mode=running_mode,
+                    delegate="cpu",
+                )
+            )
+        self.fps = fps
+        self.running_mode = running_mode
+        self.timestamp_ms = 0
+        self.space = space
+
+    def num_landmarks(self) -> int:
+        return 478
+
+    def reset(self):
+        self.timestamp_ms += 10000  # to reset the internal media pipe state
+
+    def __call__(self, frame: np.ndarray) -> mediapipe_return_type:
+        self.timestamp_ms += int(1000 / self.fps) + 1
+        # Convert the frame received from Numpy to a MediaPipe’s Image object.
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame)
+        # Perform face landmarking on the provided single image.
+        if self.running_mode == "video":
+            result = self.landmarker.detect_for_video(mp_image, self.timestamp_ms)
+        else:
+            result = self.landmarker.detect(mp_image)
+
+        if len(result.face_landmarks) == 0:
+            raise FaceNotFoundError("No face landmarks detected in the image.")
+
+        if self.space == "normal":
+            sx = 1.0
+            sy = 1.0
+        elif self.space == "image":
+            h, w = frame.shape[:2]
+            sx = w
+            sy = h
+
+        return mediapipe_return_type(
+            landmarks=[
+                (lm.x * sx, lm.y * sy, lm.z)
+                for lm in result.face_landmarks[0]
+            ],
+            blendshape=(
+                [blendshape.score for blendshape in result.face_blendshapes[0]]
+                if result.face_blendshapes
+                else []
+            ),
+            transformation_matrixes=(
+                result.facial_transformation_matrixes[0]
+                if result.facial_transformation_matrixes
+                else []
+            ),
+        )
