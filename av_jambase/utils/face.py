@@ -11,6 +11,7 @@ import torchvision as tv
 from face_alignment.detection.sfd.bbox import decode
 from face_alignment.detection.sfd.net_s3fd import s3fd
 from face_alignment.utils import load_file_from_url
+from torch.hub import download_url_to_file
 from scipy.spatial import ConvexHull
 from torch import Tensor
 from torch.utils.model_zoo import load_url
@@ -276,6 +277,14 @@ mediapipe_return_type = NamedTuple(
     ],
 )
 
+def download_file(url, model_asset_path):
+    """Download a file from a URL to a local path."""
+    model_asset_path = Path(model_asset_path)
+    model_asset_path.parent.mkdir(parents=True, exist_ok=True)
+    if not model_asset_path.exists():
+        logger.info(f"Downloading {url} to {model_asset_path}")
+        download_url_to_file(url, str(model_asset_path))
+
 
 def _options(
     model_asset_path: str | None = None,
@@ -290,6 +299,9 @@ def _options(
 ) -> FaceLandmarkerOptions:  # pyright: ignore[reportInvalidTypeForm]
     if model_asset_path is None:
         model_asset_path = __dir__.joinpath("face_landmarker.task").as_posix()
+    if not Path(model_asset_path).exists():
+        url = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/latest/face_landmarker.task'
+        download_file(url, model_asset_path)
     if delegate is None or delegate == "gpu":
         delegate = BaseOptions.Delegate.GPU
     else:
