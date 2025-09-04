@@ -1,0 +1,21 @@
+ui_file_path: ui/user_window.ui
+
+window_title: Jambase-Avatar
+
+input:
+  cam: /dev/video0
+  _kwargs_:
+    crop: square
+    do_flip: true
+
+auth:
+  # config_path: demo/IJCB-2025-09-05/authen/config/ijcb-ss-2025/main/stgcn-108kp-with_graph-20250628-185106.yaml
+  config_path: demo/IJCB-2025-09-05/authen/config/ijcb-ss-2025/main/fingerprinting-20250629-231753.yaml
+users:
+  ammar:
+    pass: ammar
+    avatar: demo/IJCB-2025-09-05/assets/database/ammar/neutral-closed.jpg
+    # avatar: /mnt/HD-8.0TB/Moonshot/demo/assets/monroe.png
+
+save_fourcc: mp4v
+loading_gif_path: /mnt/HD-8.0TB/Moonshot/avatar-session-jambase/demo/Jambase/assets/Infinity@1x-2.0s-200px-200px.gif
