@@ -1,0 +1,11 @@
+# Booth Auto-Annotator Requirements
+
+# Core dependencies
+numpy>=1.20.0
+opencv-python>=4.5.0
+
+# Optional dependencies for enhanced features
+# mtcnn>=0.1.1       # For MTCNN face detector backend
+# webrtcvad>=2.0.10  # For WebRTC VAD backend
+# torch>=1.9.0       # For Silero VAD backend
+# scipy>=1.7.0       # For better audio resampling
